@@ -1,5 +1,5 @@
 /****************************************************************************
- * sched/environ/env_unsetenv.c
+ * libs/libc/environ/env_findvar.c
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -24,69 +24,85 @@
  * Included Files
  ****************************************************************************/
 
-#include <nuttx/config.h>
-
-#ifndef CONFIG_DISABLE_ENVIRON
-
-#include <sched.h>
-#include <string.h>
 #include <assert.h>
 #include <errno.h>
 
-#include <nuttx/kmalloc.h>
+#include <nuttx/tls.h>
 
-#include "sched/sched.h"
 #include "environ/environ.h"
+
+/****************************************************************************
+ * Private Functions
+ ****************************************************************************/
+
+/****************************************************************************
+ * Name: env_cmpname
+ ****************************************************************************/
+
+static bool env_cmpname(const char *pszname, const char *peqname)
+{
+  /* Search until we find anything different in the two names */
+
+  for (; *pszname == *peqname; pszname++, peqname++)
+    {
+    }
+
+  /* On success, pszname will end with '\0' and peqname with '=' */
+
+  if (*pszname == '\0' && *peqname == '=')
+    {
+      return true;
+    }
+
+  return false;
+}
 
 /****************************************************************************
  * Public Functions
  ****************************************************************************/
 
 /****************************************************************************
- * Name: unsetenv
+ * Name: env_findvar
  *
  * Description:
- *   The unsetenv() function deletes the variable name from the environment.
+ *   Search the provided environment structure for the variable of the
+ *   specified name.
  *
  * Input Parameters:
- *   name - The name of the variable to delete
+ *   group - The task group containing environment array to be searched.
+ *   pname - The variable name to find
  *
  * Returned Value:
- *   Zero on success
+ *   A index to the name=value string in the environment
  *
  * Assumptions:
- *   Not called from an interrupt handler
+ *   - Not called from an interrupt handler
+ *   - Pre-emption is disabled by caller
  *
  ****************************************************************************/
 
-int unsetenv(FAR const char *name)
+ssize_t env_findvar(FAR struct task_info_s *info, FAR const char *pname)
 {
-  FAR struct tcb_s *rtcb = this_task();
-  FAR struct task_group_s *group = rtcb->group;
-  ssize_t idx;
+  ssize_t i;
 
-  DEBUGASSERT(group);
+  /* Verify input parameters */
 
-  /* Check the incoming parameter */
+  DEBUGASSERT(info != NULL && pname != NULL);
 
-  if (name == NULL || *name == '\0' || strchr(name, '=') != NULL)
+  if (info->ta_envp == NULL)
     {
-      set_errno(EINVAL);
-      return ERROR;
+      return -ENOENT;
     }
 
-  /* Check if the variable exists */
+  /* Search for a name=value string with matching name */
 
-  nxrmutex_lock(&group->tg_mutex);
-  if (group && (idx = env_findvar(group, name)) >= 0)
+  for (i = 0; info->ta_envp[i] != NULL; i++)
     {
-      /* It does!  Remove the name=value pair from the environment. */
-
-      env_removevar(group, idx);
+      if (env_cmpname(pname, info->ta_envp[i]))
+        {
+          return i;
+        }
     }
 
-  nxrmutex_unlock(&group->tg_mutex);
-  return OK;
+  return -ENOENT;
 }
-
-#endif /* CONFIG_DISABLE_ENVIRON */

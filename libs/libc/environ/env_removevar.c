@@ -1,5 +1,5 @@
 /****************************************************************************
- * sched/environ/env_findvar.c
+ * libs/libc/environ/env_removevar.c
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -24,96 +24,76 @@
  * Included Files
  ****************************************************************************/
 
-#include <nuttx/config.h>
-
-#ifndef CONFIG_DISABLE_ENVIRON
-
-#include <stdbool.h>
-#include <string.h>
-#include <sched.h>
 #include <assert.h>
 
 #include <nuttx/tls.h>
+#include <nuttx/lib/lib.h>
 
 #include "environ/environ.h"
-
-/****************************************************************************
- * Private Functions
- ****************************************************************************/
-
-/****************************************************************************
- * Name: env_cmpname
- ****************************************************************************/
-
-static bool env_cmpname(const char *pszname, const char *peqname)
-{
-  /* Search until we find anything different in the two names */
-
-  for (; *pszname == *peqname; pszname++, peqname++)
-    {
-    }
-
-  /* On success, pszname will end with '\0' and peqname with '=' */
-
-  if (*pszname == '\0' && *peqname == '=')
-    {
-      return true;
-    }
-
-  return false;
-}
 
 /****************************************************************************
  * Public Functions
  ****************************************************************************/
 
 /****************************************************************************
- * Name: env_findvar
+ * Name: env_removevar
  *
  * Description:
- *   Search the provided environment structure for the variable of the
- *   specified name.
+ *   Remove the referenced name=value pair from the environment
  *
  * Input Parameters:
- *   group - The task group containing environment array to be searched.
- *   pname - The variable name to find
+ *   info  - The task with the environment containing the name=value
+ *           pair
+ *   index - A index to the name=value pair in the restroom
  *
  * Returned Value:
- *   A index to the name=value string in the environment
+ *   None
  *
  * Assumptions:
  *   - Not called from an interrupt handler
- *   - Pre-emption is disabled by caller
+ *   - Caller has pre-emption disabled
+ *   - Caller will reallocate the environment structure to the correct size
  *
  ****************************************************************************/
 
-ssize_t env_findvar(FAR struct task_group_s *group, FAR const char *pname)
+void env_removevar(FAR struct task_info_s *info, ssize_t index)
 {
-  FAR struct task_info_s *info;
-  ssize_t i;
+  DEBUGASSERT(info != NULL && index >= 0 && index < info->ta_envc);
 
-  /* Verify input parameters */
+  /* Free the allocate environment string */
 
-  DEBUGASSERT(group != NULL && group->tg_info != NULL && pname != NULL);
+  lib_ufree(info->ta_envp[index]);
 
-  info = group->tg_info;
+  /* Exchange the last env and the index env */
 
-  if (info->ta_envp == NULL)
+  info->ta_envc--;
+  if (index == info->ta_envc)
     {
-      return -ENOENT;
+      info->ta_envp[index] = NULL;
+    }
+  else
+    {
+      info->ta_envp[index] = info->ta_envp[info->ta_envc];
+      info->ta_envp[info->ta_envc] = NULL;
     }
 
-  /* Search for a name=value string with matching name */
+  /* Free the old environment (if there was one) */
 
-  for (i = 0; info->ta_envp[i] != NULL; i++)
+  if (info->ta_envc == 0)
     {
-      if (env_cmpname(pname, info->ta_envp[i]))
-        {
-          return i;
-        }
+      lib_ufree(info->ta_envp);
+      info->ta_envp = NULL;
+      info->ta_envpc = 0;
     }
+  else if (info->ta_envc <=
+           (info->ta_envpc - SCHED_ENVIRON_RESERVED * 2))
+    {
+      /* Reallocate the environment to reclaim a little memory */
 
-  return -ENOENT;
+      info->ta_envpc = info->ta_envc + SCHED_ENVIRON_RESERVED + 1;
+
+      info->ta_envp = lib_urealloc(info->ta_envp,
+         sizeof(*info->ta_envp) * info->ta_envpc);
+      DEBUGASSERT(info->ta_envp != NULL);
+    }
 }
-
-#endif /* CONFIG_DISABLE_ENVIRON */

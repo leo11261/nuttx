@@ -42,7 +42,6 @@
 #  include <nuttx/binfmt/binfmt.h>
 #endif
 
-#include "environ/environ.h"
 #include "signal/signal.h"
 #include "pthread/pthread.h"
 #include "mqueue/mqueue.h"
@@ -80,12 +79,6 @@ static inline void group_release(FAR struct task_group_s *group)
   /* Destroy the mutex */
 
   nxrmutex_destroy(&group->tg_mutex);
-
-  /* Release all shared environment variables */
-
-  env_release(group);
-
-  task_uninit_info(group);
 
 #if defined(CONFIG_SCHED_HAVE_PARENT) && defined(CONFIG_SCHED_CHILD_STATUS)
   /* Free all un-reaped child exit status */
@@ -143,6 +136,12 @@ static inline void group_release(FAR struct task_group_s *group)
   /* Mark the group as deleted now */
 
   group->tg_flags |= GROUP_FLAG_DELETED;
+
+  /* Release the task info (environment, streams, locks) before dropping
+   * the group, since it dereferences group->tg_info.
+   */
+
+  task_uninit_info(group);
 
   /* Then drop the group freeing the allocated memory */
 

@@ -1,5 +1,5 @@
 /****************************************************************************
- * sched/environ/env_putenv.c
+ * libs/libc/environ/env_getenv.c
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -24,81 +24,81 @@
  * Included Files
  ****************************************************************************/
 
-#include <nuttx/config.h>
-
-#ifndef CONFIG_DISABLE_ENVIRON
-
-#include <stdlib.h>
-#include <sched.h>
-#include <string.h>
 #include <errno.h>
+#include <string.h>
 
-#include <nuttx/lib/lib.h>
+#include <nuttx/mutex.h>
+#include <nuttx/tls.h>
+
+#include "environ/environ.h"
 
 /****************************************************************************
  * Public Functions
  ****************************************************************************/
 
 /****************************************************************************
- * Name: putenv
+ * Name: getenv
  *
  * Description:
- *   The putenv() function adds or changes the value of environment
- *   variables.
- *   The argument string is of the form name=value. If name does not already
- *   exist in  the  environment, then string is added to the environment. If
- *   name does exist, then the value of name in the environment is changed to
- *   value.
+ *   The getenv() function searches the environment list for a string that
+ *   matches the string pointed to by name.
  *
  * Input Parameters:
- *   name=value string describing the environment setting to add/modify
+ *   name - The name of the variable to find.
  *
  * Returned Value:
- *   Zero on success
+ *   The value of the variable (read-only) or NULL on failure
  *
  * Assumptions:
  *   Not called from an interrupt handler
  *
  ****************************************************************************/
 
-int putenv(FAR const char *string)
+FAR char *getenv(FAR const char *name)
 {
-  FAR char *pname;
-  FAR char *pequal;
-  int ret = OK;
+  FAR struct task_info_s *info = task_get_info();
+  FAR char *pvalue = NULL;
+  ssize_t ret = OK;
 
   /* Verify that a string was passed */
 
-  if (!string)
+  if (name == NULL || info == NULL
+#if defined(CONFIG_BUILD_FLAT) || defined(__KERNEL__)
+      || up_interrupt_context() || sched_idletask()
+#endif
+     )
     {
-      ret = EINVAL;
+      ret = -EINVAL;
       goto errout;
     }
 
-  /* Parse the name=value string */
-
-  pname = strdup(string);
-  if (!pname)
+  nxrmutex_lock(&info->ta_lock);
+  ret = env_findvar(info, name);
+  if (ret < 0)
     {
-      ret = ENOMEM;
+      nxrmutex_unlock(&info->ta_lock);
       goto errout;
     }
 
-  pequal = strchr(pname, '=');
-  if (pequal)
-    {
-      /* Then let setenv do all of the work */
+  /* It does!  Get the value sub-string from the name=value string */
 
-      *pequal = '\0';
-      ret = setenv(pname, pequal + 1, TRUE);
+  pvalue = strchr(info->ta_envp[ret], '=');
+  if (pvalue == NULL)
+    {
+      /* The name=value string has no '='  This is a bug! */
+
+      nxrmutex_unlock(&info->ta_lock);
+      ret = -EINVAL;
+      goto errout;
     }
 
-  kmm_free(pname);
-  return ret;
+  /* Adjust the pointer so that it points to the value right after the '=' */
+
+  pvalue++;
+  nxrmutex_unlock(&info->ta_lock);
+  return pvalue;
 
 errout:
-  set_errno(ret);
-  return ERROR;
+  set_errno(-ret);
+  return NULL;
 }
-
-#endif /* CONFIG_DISABLE_ENVIRON */

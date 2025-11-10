@@ -1,5 +1,5 @@
 /****************************************************************************
- * sched/environ/env_secureexec.c
+ * libs/libc/environ/env_secureexec.c
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -29,9 +29,12 @@
 #include <stdbool.h>
 #include <string.h>
 #include <stdlib.h>
+#include <unistd.h>
 #include <assert.h>
 
-#include "sched/sched.h"
+#include <nuttx/mutex.h>
+#include <nuttx/tls.h>
+
 #include "environ/environ.h"
 
 /****************************************************************************
@@ -97,21 +100,21 @@ static bool env_is_unsafe(FAR const char *pair)
  ****************************************************************************/
 
 #ifdef CONFIG_SCHED_USER_IDENTITY
-void env_sanitize_secure(FAR struct task_group_s *group)
+void env_sanitize_secure(FAR struct task_info_s *info)
 {
   ssize_t index;
 
-  DEBUGASSERT(group != NULL);
+  DEBUGASSERT(info != NULL);
 
-  nxrmutex_lock(&group->tg_mutex);
+  nxrmutex_lock(&info->ta_lock);
 
-  for (index = group->tg_envc - 1; index >= 0; )
+  for (index = info->ta_envc - 1; index >= 0; )
     {
-      FAR char *pair = group->tg_envp[index];
+      FAR char *pair = info->ta_envp[index];
 
       if (pair != NULL && env_is_unsafe(pair))
         {
-          env_removevar(group, index);
+          env_removevar(info, index);
         }
       else
         {
@@ -119,7 +122,7 @@ void env_sanitize_secure(FAR struct task_group_s *group)
         }
     }
 
-  nxrmutex_unlock(&group->tg_mutex);
+  nxrmutex_unlock(&info->ta_lock);
 }
 #endif
 

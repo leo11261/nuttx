@@ -1,5 +1,5 @@
 /****************************************************************************
- * sched/environ/env_release.c
+ * libs/libc/environ/env_foreach.c
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -24,15 +24,9 @@
  * Included Files
  ****************************************************************************/
 
-#include <nuttx/config.h>
-
-#ifndef CONFIG_DISABLE_ENVIRON
-
-#include <sched.h>
 #include <assert.h>
-#include <errno.h>
 
-#include <nuttx/kmalloc.h>
+#include <nuttx/environ.h>
 #include <nuttx/tls.h>
 
 #include "environ/environ.h"
@@ -42,56 +36,60 @@
  ****************************************************************************/
 
 /****************************************************************************
- * Name: env_release
+ * Name: env_foreach
  *
  * Description:
- *   env_release() is called only from group_leave() when the last member of
- *   a task group exits.  The env_release() function clears the environment
- *   of all name-value pairs and sets the value of the external variable
- *   environ to NULL.
+ *   Visit each name-value pair in the environment.
  *
  * Input Parameters:
- *   group - Identifies the task group containing the environment structure
- *           to be released.
+ *   info  - The task containing environment array to be searched.
+ *   cb    - The callback function to be invoked for each environment
+ *           variable.
  *
  * Returned Value:
- *   None
+ *   Zero if the all environment variables have been traversed.  A non-zero
+ *   value means that the callback function requested early termination by
+ *   returning a nonzero value.
  *
  * Assumptions:
- *   Not called from an interrupt handler
+ *   - Not called from an interrupt handler
+ *   - Pre-emptions is disabled by caller
  *
  ****************************************************************************/
 
-void env_release(FAR struct task_group_s *group)
+int env_foreach(FAR struct task_info_s *info,
+                env_foreach_t cb,
+                FAR void *arg)
 {
-  FAR struct task_info_s *info;
-  int i;
+  int ret = OK;
+  size_t i;
 
-  DEBUGASSERT(group != NULL && group->tg_info != NULL);
+  /* Verify input parameters */
 
-  info = group->tg_info;
+  DEBUGASSERT(info != NULL && cb != NULL);
 
-  if (info->ta_envp)
+  if (info->ta_envp == NULL)
     {
-      /* Free any allocate environment strings */
-
-      for (i = 0; info->ta_envp[i] != NULL; i++)
-        {
-          group_free(group, info->ta_envp[i]);
-        }
-
-      /* Free the environment */
-
-      group_free(group, info->ta_envp);
+      return ret;
     }
 
-  /* In any event, make sure that all environment-related variables in the
-   * task group structure are reset to initial values.
-   */
+  for (i = 0; info->ta_envp[i] != NULL; i++)
+    {
+      /* Perform the callback */
 
-  info->ta_envp  = NULL;
-  info->ta_envpc = 0;
-  info->ta_envc  = 0;
+      ret = cb(arg, info->ta_envp[i]);
+
+      /* Terminate the traversal early if the callback so requests by
+       * returning a non-zero value.
+       */
+
+      if (ret != 0)
+        {
+          break;
+        }
+    }
+
+  DEBUGASSERT(ret != OK || info->ta_envc == i);
+
+  return ret;
 }
-
-#endif /* CONFIG_DISABLE_ENVIRON */
